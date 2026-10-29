@@ -27,7 +27,8 @@ function excerptPin(pin, max, context) {
     .map((text, i) => ({ text, i })).filter(l => l.text.trim() && l.text.length <= 400);
   const size = pin.size ?? tokens(pin.text);
   const header = `[excerpt of user request ${pin.ref ?? "from an earlier checkpoint"}, ~${size} tokens; full text: jev_recall id]`;
-  const ranked = context ? [...lines.slice(0, 2), ...lines.slice(-2), ...lines.filter(l => MARKED.test(l.text)), ...lines.filter(l => SALIENT.test(l.text))]
+  // Marked lines first: the larger version must never lose what the minimal one kept.
+  const ranked = context ? [...lines.filter(l => MARKED.test(l.text)), ...lines.slice(0, 2), ...lines.slice(-2), ...lines.filter(l => SALIENT.test(l.text))]
     : lines.filter(l => MARKED.test(l.text));
   const kept = new Set();
   let used = tokens(header);

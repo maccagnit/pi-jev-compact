@@ -9,7 +9,7 @@ La modalità predefinita non fa chiamate generative: al massimo una richiesta Je
 
 ## Installazione
 
-Richiede Pi ≥ 0.87.1 (verificato su 0.87.1, 1.0.2 e 1.4.0) e Node ≥ 22.19.
+Richiede Node ≥ 22.19. La versione 0.3.0 è verificata su Pi 1.4.0; le versioni precedenti su 0.87.1 e 1.0.2.
 
 ```sh
 pi install git:github.com/<owner>/pi-jev-compact        # oppure: pi install https://github.com/<owner>/pi-jev-compact

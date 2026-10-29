@@ -9,7 +9,7 @@ The default compaction mode makes no generative LLM call: at most one Jev reques
 
 ## Install
 
-Requires Pi ≥ 0.87.1 (verified on 0.87.1, 1.0.2 and 1.4.0) and Node ≥ 22.19.
+Requires Node ≥ 22.19. Version 0.3.0 is verified on Pi 1.4.0; earlier releases were verified on 0.87.1 and 1.0.2.
 
 ```sh
 pi install git:github.com/<owner>/pi-jev-compact        # or: pi install https://github.com/<owner>/pi-jev-compact

@@ -224,3 +224,11 @@ test('recall ignores its own calls and falls back to all-terms matching',()=>{
   assert.deepEqual(recall(branch,{query:'jev_recall'}).matches,[]);
   assert.equal(recall(branch,{query:'vault-123 is'}).match,'phrase');
 });
+test('the newest pin keeps its marked lines even when its first and last lines are long',async()=>{
+  const prose=i=>(`Paragraph ${i} `+'plain words without markers '.repeat(20)).slice(0,398);
+  const notes=Array.from({length:4},(_,i)=>`# NOTE: the access code for vault-${i} is ZX81ZX8${i}.`);
+  const content=[prose(1),prose(2),...Array.from({length:120},(_,i)=>`row ${i} plain filler text`),...notes,...Array.from({length:120},(_,i)=>`row ${i} more filler text`),prose(3),prose(4)].join('\n');
+  const e=fixture(0);e.preparation.messagesToSummarize[0].content=content;
+  const r=await compact(e);assert(r.compaction);assert.equal(r.compaction.details.metrics.pins,'bounded');
+  for(const note of notes) assert(r.compaction.summary.includes(note),note);
+});

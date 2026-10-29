@@ -2,7 +2,7 @@
 
 `lctest.py` (Python 3, standard library only) measures whether planted facts survive compaction.
 
-- `session --pi`: 24 user turns of about 6,000 tokens of real Python stdlib source, sent through `pi -p` into one saved session. 12 access codes are planted as `# NOTE:` lines in turns 1–8, and 4 of them are changed by `# CORRECTION:` lines in turns 12–16. A final turn asks for every current code as JSON; the score is exact matches and stale (pre-correction) answers. The total is about 150k tokens, so a 98k window must compact about 3 times.
+- `session --pi`: 24 user turns of about 6,000 tokens of real Python stdlib source, sent through `pi -p` into one saved session. 12 access codes are planted as `# NOTE:` lines in turns 1–8, and 4 of them are changed by `# CORRECTION:` lines in turns 12–16. A final turn asks for every current code as JSON; the score is exact matches and stale (pre-correction) answers. The total is about 150k tokens, so a 98k window compacts 2–3 times.
 - `session` without `--pi`: the same conversation over raw HTTP, with no compaction (a control that overflows).
 - `needle`: one large prompt at several sizes; checks recall and prefill speed.
 
