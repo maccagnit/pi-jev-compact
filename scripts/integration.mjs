@@ -78,7 +78,7 @@ try {
   // A custom budget refusal must fall through to Pi, not cancel compaction.
   session.dispose();
   const fallbackManager=SessionManager.create(dir,dir);
-  fallbackManager.appendMessage({id:randomUUID(),role:'user',content:'Uncompressible verbatim user request. '.repeat(1200),timestamp:Date.now()});
+  fallbackManager.appendMessage({id:randomUUID(),role:'user',content:'Too little history to reclaim. '.repeat(30),timestamp:Date.now()});
   fallbackManager.appendMessage(assistant([{type:'text',text:'Recent tail.'}]));
   const fallbackSettings=SettingsManager.inMemory({compaction:{enabled:true,reserveTokens:16384,keepRecentTokens:0}});
   const fallbackLoader=new DefaultResourceLoader({cwd:dir,agentDir:dir,settingsManager:fallbackSettings,additionalExtensionPaths:[resolve('index.ts')],noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true});
@@ -89,6 +89,9 @@ try {
   const nativeResult=await session.compact();
   assert(nativeResult.summary);assert.notEqual(nativeResult.details.engine,MARKER);assert.equal(calls,2);
   assert.equal(fallbackManager.getBranch().filter(e=>e.type==='compaction').length,1);
+  // The fall-through is recorded in the session (notices are invisible in print/json mode).
+  const record=fallbackManager.getBranch().find(e=>e.type==='custom'&&e.customType==='pi-jev-compact-fallback');
+  assert.deepEqual(record?.data,{version:'0.3.0',reason:'too_little_to_reclaim',jevKey:'none'});
   // Pi <1.4 passed the model maxTokens to native summaries; 1.4 leaves it to the provider.
   assert.equal(outputLimits[0],1000);assert([4096,undefined].includes(outputLimits[1]));
   // Only a user's actual abort cancels the host; ordinary exceptions fall through.

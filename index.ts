@@ -1,16 +1,21 @@
-import { SessionManager, estimateTokens, getPackageDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { SessionManager, estimateTokens, getAgentDir, getPackageDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { rm } from "node:fs/promises";
 import { Type } from "typebox";
 import { compact, recall, messageText, MARKER, LIMITS } from "./compact.ts";
 import { prepareInit } from "./init.ts";
+import { loadConfig, resolveKey } from "./config.ts";
 
-const VERSION = "0.2.2";
+const VERSION = "0.3.0";
 
 export default function (pi: ExtensionAPI) {
   let enabled = true;
   let mode: "fast" | "summary" = "fast";
+  const config = loadConfig(getAgentDir());
+  // Notices are invisible in print/json mode: a native fallback is also recorded in the session.
+  let pendingFallback: { reason: string; jevKey: string } | undefined;
+  const fallBack = (reason: string, jevKey: string) => { pendingFallback = { reason, jevKey }; };
   const conflicting = () => pi.getActiveTools().some(name => ["compress", "decompress", "acp_status"].includes(name));
   pi.registerCommand("jev-compact", {
     description: "Jev compact init | status | fast | summary | on | off (default: fast)",
@@ -39,8 +44,8 @@ export default function (pi: ExtensionAPI) {
       else if (action === "fast" || action === "summary") { mode = action; enabled = true; }
       else if (action && action !== "status") { ctx.ui.notify("Usage: /jev-compact [init|status|fast|summary|on|off]", "warning"); return; }
       const latest = [...ctx.sessionManager.getBranch()].reverse().find(e => e.type === "compaction" && (e.details as any)?.engine === MARKER);
-      ctx.ui.notify(JSON.stringify({ version: VERSION, enabled, mode, conflict: conflicting(), jevKey: !!process.env.TYPESAFE_API_KEY,
-        last: (latest?.details as any)?.metrics ?? null }), "info");
+      ctx.ui.notify(JSON.stringify({ version: VERSION, enabled, mode, conflict: conflicting(), jevKey: resolveKey(config).source,
+        configError: config.error ?? null, last: (latest?.details as any)?.metrics ?? null }), "info");
     },
   });
   pi.registerTool({
@@ -56,16 +61,23 @@ export default function (pi: ExtensionAPI) {
       return { content: [{ type: "text", text: JSON.stringify(result) }], details: undefined };
     },
   });
+  pi.on("session_compact", event => {
+    if (pendingFallback && !event.fromExtension) pi.appendEntry("pi-jev-compact-fallback", { version: VERSION, ...pendingFallback });
+    pendingFallback = undefined;
+  });
   pi.on("session_before_compact", async (event, ctx) => {
+    pendingFallback = undefined;
     if (!enabled) return;
+    const { key, source } = resolveKey(config);
     if (conflicting()) {
       ctx.ui.notify("Jev compact inactive: another compactor exposes compress/decompress/acp_status.", "warning");
+      fallBack("conflicting_compactor", source);
       return;
     }
     try {
       const currentUser = [...ctx.sessionManager.buildSessionProjection().messages].reverse().find(m => m.role === "user");
       const result = await compact(event, {
-        key: process.env.TYPESAFE_API_KEY,
+        key,
         activeGoal: currentUser ? messageText(currentUser) : undefined,
         summarize: mode === "summary" && ctx.model ? async (prompt, signal) => {
           const stream = ctx.modelRegistry.streamSimple(ctx.model!, { messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }] },
@@ -76,12 +88,14 @@ export default function (pi: ExtensionAPI) {
       if (result.cancel) {
         if (event.signal.aborted) return { cancel: true };
         ctx.ui.notify(`Jev compact: using native compaction (${result.reason}).`, "info");
+        fallBack(result.reason, source);
         return;
       }
       return result;
     } catch {
       if (event.signal.aborted) return { cancel: true };
       ctx.ui.notify("Jev compact unavailable; using native compaction.", "warning");
+      fallBack("error", source);
       return;
     }
   });

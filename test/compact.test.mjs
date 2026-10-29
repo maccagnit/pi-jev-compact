@@ -178,3 +178,35 @@ test('migration: large user requests remain verbatim when enough other context i
   const e=fixture();e.preparation.messagesToSummarize[0].content='Exact user constraint. '.repeat(500);
   const r=await compact(e);assert(r.compaction);assert(r.compaction.summary.includes(e.preparation.messagesToSummarize[0].content));
 });
+test('config: missing file gives defaults, a broken file is reported, globs match provider/model',async()=>{
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { loadConfig, resolveKey, modelMatches, CONFIG_FILE } = await import('../config.ts');
+  const dir=await mkdtemp(join(tmpdir(),'jev-config-'));
+  try {
+    assert.deepEqual(loadConfig(dir).stripThinkingModels,[]);
+    await writeFile(join(dir,CONFIG_FILE),'{broken');assert.match(loadConfig(dir).error,/pi-jev-compact\.json/);
+    await writeFile(join(dir,'key'),'  ts_file_key_value\n');
+    await writeFile(join(dir,CONFIG_FILE),JSON.stringify({stripThinkingModels:['home-qwen*/orcarouter-*'],typesafeApiKeyFile:join(dir,'key')}));
+    const config=loadConfig(dir);
+    assert(modelMatches(config.stripThinkingModels,{provider:'home-qwen-remote',id:'orcarouter-qwen3.8-27b'}));
+    assert(!modelMatches(config.stripThinkingModels,{provider:'openai',id:'orcarouter-x'}));
+    assert(!modelMatches([],{provider:'home-qwen',id:'orcarouter-qwen3.8-27b'}));
+    assert.deepEqual(resolveKey(config,{}),{key:'ts_file_key_value',source:'file'});
+    assert.deepEqual(resolveKey(config,{TYPESAFE_API_KEY:'from-env'}),{key:'from-env',source:'env'});
+    assert.equal(resolveKey({...config,typesafeApiKeyFile:join(dir,'missing')},{}).source,'file_unreadable');
+    assert.equal(resolveKey({stripThinkingModels:[]},{}).source,'none');
+  } finally { await rm(dir,{recursive:true,force:true}); }
+});
+test('redaction covers JSON keys and common provider token formats',()=>{
+  const text=['"api_key": "abc123secretvalue"',"password: 'hunter2hunter2'",'AKIAABCDEFGHIJKLMNOP','ghp_'+'a'.repeat(36),
+    'xoxb-1234567890-abcdefghij','eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXZhbHVl'].join('\n');
+  const out=redact(text);
+  for(const leaked of ['abc123secretvalue','hunter2hunter2','AKIAABCDEFGHIJKLMNOP','ghp_aaaa','xoxb-1234567890','eyJhbGciOiJIUzI1NiJ9.']) assert(!out.includes(leaked),leaked);
+});
+test('code-heavy candidates are shortened to fit the Jev payload instead of abandoning Jev',async()=>{
+  const heavy='"\\\\"'.repeat(400);let sent;
+  const r=await select(Array.from({length:8},()=>({role:'toolResult',text:heavy})),'goal',{key:'fake',fetchImpl:fakeFetch('KEEP',p=>{sent=p})});
+  assert.equal(r.status,'ok');assert(JSON.stringify(sent).length<=14000);
+});

@@ -1,6 +1,6 @@
 {
   "name": "pi-jev-compact",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Bounded Jev-assisted compaction with native Pi history recovery",
