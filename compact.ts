@@ -193,11 +193,21 @@ export function recall(branch, { query, id, offset = 0 }) {
     return { id, text: raw.slice(offset, offset + 4000), nextOffset: offset + 4000 < raw.length ? offset + 4000 : null, totalChars: raw.length };
   }
   if (!query?.trim()) throw new Error("Provide query or id");
-  const needle = query.toLowerCase();
-  const matches = branch.filter(e => e.type === "message").flatMap(e => {
-    const text = messageText(e.message);
-    const at = text.toLowerCase().indexOf(needle);
-    return at < 0 ? [] : [{ id: e.id, role: e.message.role, excerpt: text.slice(Math.max(0, at - 80), at + 300) }];
+  // Earlier recall calls and results contain the query itself: never return them as evidence.
+  const searchable = branch.filter(e => e.type === "message" && !(e.message.role === "toolResult" && e.message.toolName === "jev_recall"))
+    .map(e => ({ e, text: messageText(Array.isArray(e.message.content)
+      ? { ...e.message, content: e.message.content.filter(c => !(c.type === "toolCall" && c.name === "jev_recall")) } : e.message) }));
+  const find = needles => searchable.flatMap(({ e, text }) => {
+    const lower = text.toLowerCase();
+    if (!needles.every(n => lower.includes(n))) return [];
+    // Show the context of the rarest term: common words like "code" anchor nowhere useful.
+    const rarest = needles.reduce((a, b) => lower.split(b).length < lower.split(a).length ? b : a);
+    const at = lower.indexOf(rarest);
+    return [{ id: e.id, role: e.message.role, excerpt: text.slice(Math.max(0, at - 80), at + 300) }];
   });
-  return { matches: matches.slice(offset, offset + 6), nextOffset: offset + 6 < matches.length ? offset + 6 : null, total: matches.length };
+  const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(t => t.length >= 2))];
+  let match = "phrase", matches = find([query.trim().toLowerCase()]);
+  // Models often ask for several words at once: fall back to messages containing every term.
+  if (!matches.length && terms.length > 1) { match = "all_terms"; matches = find(terms); }
+  return { matches: matches.slice(offset, offset + 6), nextOffset: offset + 6 < matches.length ? offset + 6 : null, total: matches.length, match };
 }

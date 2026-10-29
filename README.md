@@ -32,12 +32,12 @@ Everything is optional. With no configuration, the compactor runs in local mode 
 The key is looked up at each compaction, in this order:
 
 1. The `TYPESAFE_API_KEY` environment variable of the Pi process.
-2. The file named by `typesafeApiKeyFile` in the config file below. The whole file is the key; surrounding whitespace is ignored.
+2. A key file: by default `~/.config/jev/typesafe.key`, or the path in `typesafeApiKeyFile` (config file below). The whole file is the key; surrounding whitespace is ignored.
 
-A key file is the more reliable choice: it works in the TUI, in `pi -p`, and when Pi is started by another tool that doesn't inherit your shell's environment. Keep it private:
+A key file is the more reliable choice: it works in the TUI, in `pi -p`, and when Pi is started by another tool that doesn't inherit your shell's environment. On a new machine, creating the default file is all the setup needed. Keep it private:
 
 ```sh
-mkdir -p ~/.config/typesafe && umask 077 && printf '%s' 'YOUR_KEY' > ~/.config/typesafe/key
+mkdir -p ~/.config/jev && (umask 077 && printf '%s' 'YOUR_KEY' > ~/.config/jev/typesafe.key)
 ```
 
 `/jev-compact status` shows where the key came from (`jevKey`: `env`, `file`, `none`, `file_empty` or `file_unreadable`). Each checkpoint records what happened in `details.metrics.jev`: `ok`, `missing_key`, `timeout`, `unavailable` or `input_budget`. Without a key, the extension keeps every selected excerpt (local mode).
@@ -48,14 +48,14 @@ Path: `<Pi agent dir>/pi-jev-compact.json`, normally `~/.pi/agent/pi-jev-compact
 
 ```json
 {
-  "typesafeApiKeyFile": "~/.config/typesafe/key",
+  "typesafeApiKeyFile": "~/secrets/typesafe.key",
   "stripThinkingModels": ["my-llama-cpp/qwen*"]
 }
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
-| `typesafeApiKeyFile` | none | File holding the TypeSafe key, used when `TYPESAFE_API_KEY` is unset. `~` is expanded. |
+| `typesafeApiKeyFile` | `~/.config/jev/typesafe.key` | File holding the TypeSafe key, used when `TYPESAFE_API_KEY` is unset. `~` is expanded. A missing default file just means local mode. |
 | `stripThinkingModels` | `[]` | `provider/model-id` patterns (`*` wildcard). For these models, the loop guard drops earlier `thinking` blocks from the request projection. The saved session is unchanged. This helped a local Qwen escape a 112-call retry loop (see [docs/INCIDENT-2026-10-04.md](docs/INCIDENT-2026-10-04.md)). |
 
 A malformed file never stops Pi from starting: defaults apply, and `/jev-compact status` reports `configError`.

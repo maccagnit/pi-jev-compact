@@ -213,3 +213,14 @@ test('code-heavy candidates are shortened to fit the Jev payload instead of aban
   const r=await select(Array.from({length:8},()=>({role:'toolResult',text:heavy})),'goal',{key:'fake',fetchImpl:fakeFetch('KEEP',p=>{sent=p})});
   assert.equal(r.status,'ok');assert(JSON.stringify(sent).length<=14000);
 });
+test('recall ignores its own calls and falls back to all-terms matching',()=>{
+  const branch=[
+    {type:'message',id:'u1',message:{role:'user',content:'Part 3:\n# NOTE: the access code for vault-123 is QWERTY12.'}},
+    {type:'message',id:'a1',message:{role:'assistant',content:[{type:'toolCall',id:'c1',name:'jev_recall',arguments:{query:'access code vault'}}]}},
+    {type:'message',id:'r1',message:{role:'toolResult',toolCallId:'c1',toolName:'jev_recall',content:[{type:'text',text:'{"matches":[],"query":"access code vault"}'}]}},
+  ];
+  const r=recall(branch,{query:'access code vault'});
+  assert.equal(r.match,'all_terms');assert.deepEqual(r.matches.map(m=>m.id),['u1']);assert(r.matches[0].excerpt.includes('QWERTY12'));
+  assert.deepEqual(recall(branch,{query:'jev_recall'}).matches,[]);
+  assert.equal(recall(branch,{query:'vault-123 is'}).match,'phrase');
+});

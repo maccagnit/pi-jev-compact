@@ -50,7 +50,7 @@ export default function (pi: ExtensionAPI) {
   });
   pi.registerTool({
     name: "jev_recall", label: "Recall compacted history",
-    description: "Search original messages on this session branch. Read an entry by id with offset pagination. Recover exact details omitted by compaction.",
+    description: "Search original messages on this session branch (exact phrase, else messages containing every word). Read an entry by id with offset pagination. Recover exact details omitted by compaction.",
     parameters: Type.Object({
       query: Type.Optional(Type.String()), id: Type.Optional(Type.String()),
       offset: Type.Optional(Type.Integer({ minimum: 0 })),

@@ -30,12 +30,12 @@ Tutto è facoltativo. Senza configurazione il compattatore lavora in modalità l
 A ogni compattazione la chiave viene cercata in quest'ordine:
 
 1. variabile d'ambiente `TYPESAFE_API_KEY` del processo Pi;
-2. il file indicato da `typesafeApiKeyFile` nel file di configurazione (contenuto = chiave; gli spazi esterni vengono ignorati).
+2. un file con la chiave: per default `~/.config/jev/typesafe.key`, oppure il percorso in `typesafeApiKeyFile` (contenuto = chiave; gli spazi esterni vengono ignorati).
 
-Il file è la scelta più affidabile: funziona nel TUI, con `pi -p` e quando Pi viene avviato da un altro programma che non eredita l'ambiente della shell. Tenerlo privato:
+Il file è la scelta più affidabile: funziona nel TUI, con `pi -p` e quando Pi viene avviato da un altro programma che non eredita l'ambiente della shell. Su un nuovo computer basta creare il file predefinito. Tenerlo privato:
 
 ```sh
-mkdir -p ~/.config/typesafe && umask 077 && printf '%s' 'LA_TUA_CHIAVE' > ~/.config/typesafe/key
+mkdir -p ~/.config/jev && (umask 077 && printf '%s' 'LA_TUA_CHIAVE' > ~/.config/jev/typesafe.key)
 ```
 
 `/jev-compact status` mostra l'origine della chiave (`jevKey`: `env`, `file`, `none`, `file_empty`, `file_unreadable`). Ogni checkpoint registra l'esito in `details.metrics.jev`: `ok`, `missing_key`, `timeout`, `unavailable` o `input_budget`. Senza chiave tutti gli estratti selezionati vengono conservati (modalità locale).
@@ -46,14 +46,14 @@ Percorso: `<cartella agent di Pi>/pi-jev-compact.json`, di norma `~/.pi/agent/pi
 
 ```json
 {
-  "typesafeApiKeyFile": "~/.config/typesafe/key",
+  "typesafeApiKeyFile": "~/secrets/typesafe.key",
   "stripThinkingModels": ["my-llama-cpp/qwen*"]
 }
 ```
 
 | Chiave | Default | Significato |
 |---|---|---|
-| `typesafeApiKeyFile` | nessuno | File con la chiave TypeSafe, usato se `TYPESAFE_API_KEY` non è impostata. `~` viene espanso. |
+| `typesafeApiKeyFile` | `~/.config/jev/typesafe.key` | File con la chiave TypeSafe, usato se `TYPESAFE_API_KEY` non è impostata. `~` viene espanso. Se il file predefinito manca si usa la modalità locale. |
 | `stripThinkingModels` | `[]` | Pattern `provider/model-id` (jolly `*`). Per questi modelli la protezione esclude i `thinking` precedenti dalla richiesta, senza modificare la sessione salvata. Ha aiutato un Qwen locale a uscire da un ciclo di 112 chiamate ([docs/INCIDENT-2026-10-04.md](docs/INCIDENT-2026-10-04.md)). |
 
 Un file malformato non impedisce l'avvio di Pi: si usano i default e `/jev-compact status` riporta `configError`.
