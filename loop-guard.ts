@@ -1,10 +1,13 @@
-import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { SessionManager, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { rm } from "node:fs/promises";
 import { repeatedFailure, recoverLoop, withoutReplayedThinking } from "./loop.ts";
+import { loadConfig } from "./config.ts";
 
 // Independent entrypoint: remains enabled when the Jev compactor is disabled.
 export default function (pi: ExtensionAPI) {
-  pi.on("context", (event, ctx) => ({ messages: withoutReplayedThinking(event.messages, ctx.model) }));
+  // Thinking is dropped from replayed history only for models listed in stripThinkingModels.
+  const { stripThinkingModels } = loadConfig(getAgentDir());
+  pi.on("context", (event, ctx) => ({ messages: withoutReplayedThinking(event.messages, ctx.model, stripThinkingModels) }));
   pi.on("tool_call", (event, ctx) => {
     if (event.parentToolCallId) return;
     const run = repeatedFailure(ctx.sessionManager.getBranch(), event);

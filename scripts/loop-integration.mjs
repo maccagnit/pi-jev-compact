@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { sdk, ai } from './pi-sdk.mjs';
 import { repeatedFailure, recoverLoop, withoutReplayedThinking } from '../loop.ts';
 const dir = await mkdtemp(join(tmpdir(), 'pi-loop-test-'));
+const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
 let session;
 try {
+  // The thinking filter is opt-in per model through the package config file.
+  process.env.PI_CODING_AGENT_DIR = dir;
+  await writeFile(join(dir, 'pi-jev-compact.json'), JSON.stringify({ stripThinkingModels: ['home-qwen*/orcarouter-*'] }));
   const runtime = await sdk.ModelRuntime.create({ authPath: join(dir, 'auth.json'), modelsPath: null,
     modelsStorePath: join(dir, 'models.json'), refreshOnCreate: false });
   const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
@@ -64,9 +68,12 @@ try {
   for (const e of branch) assert.equal(JSON.stringify(restored.getEntry(e.id)), JSON.stringify(e));
   assert.equal(restored.buildSessionProjection().messages.filter(m => m.role === 'toolResult').length, 1);
   assert.equal(await readFile(manager.getSessionFile(), 'utf8'), raw);
-  console.log(JSON.stringify({ pi: '1.0.2', realAgentLoopTerminated: true, providerRequests: requests, toolExecutions: executions,
+  console.log(JSON.stringify({ pi: JSON.parse(await readFile(join(sdk.getPackageDir(), 'package.json'), 'utf8')).version, realAgentLoopTerminated: true, providerRequests: requests, toolExecutions: executions,
     successfulPollingAllowed: true, changedResultsAllowed: true, compactionCannotResetGuard: true,
     newUserCanRetry: true, recoveredProjectionKeepsOnePair: true, fullArchivePreserved: true,
     compactorNotLoaded: true, staleThinkingExcludedFromRequests: true, rawThinkingPreserved: true,
     otherProvidersUnchanged: true, apiCalls: 0 }, null, 2));
-} finally { session?.dispose(); await rm(dir, { recursive: true, force: true }); }
+} finally {
+  session?.dispose(); await rm(dir, { recursive: true, force: true });
+  if (agentDirEnv === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = agentDirEnv;
+}

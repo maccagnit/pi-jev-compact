@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { select } from "./jev.ts";
 
-export const LIMITS = Object.freeze({ checkpointTokens: 2400, inputTokens: 6000, outputTokens: 1000, minSavedTokens: 512, summaryTimeoutMs: 20000 });
+export const LIMITS = Object.freeze({ checkpointTokens: 2400, pinTokens: 2400, pinTokensEach: 600, pinTokensMin: 150, inputTokens: 6000, outputTokens: 1000, minSavedTokens: 512, summaryTimeoutMs: 20000 });
 export const MARKER = "pi-jev-compact/v1";
 // Deliberately conservative and deterministic; telemetry labels these as estimates.
 export const tokens = text => Math.ceil(Buffer.byteLength(text, "utf8") / 3);
@@ -16,9 +17,47 @@ function excerpts(text, max = 800) {
   const lines = text.split("\n").filter(l => l.trim() && l.length <= max);
   return [...new Set([...lines.slice(0, 2), ...lines.filter(l => /error|fail|decision|next|todo|test|commit|path|constraint/i.test(l)).slice(-3), ...lines.slice(-2)])];
 }
+const digest = text => createHash("sha256").update(text).digest("hex").slice(0, 16);
+const MARKED = /^\W*(?:note|correction|important|remember|constraint|decision|requirement|must|never|do not|don't|todo|fixme|warning)\b/i;
+const SALIENT = /\b(?:note|correction|important|remember|constraint|decision|requirement|must|never|do not|don't|todo|fixme|warning)\b/i;
+// Complete lines only, labelled as an excerpt; the full request stays reachable by its entry id.
+function excerptPin(pin, max, context) {
+  // Long prose lines are split at sentence ends; anything still over 400 chars stays only in the original.
+  const lines = pin.text.split("\n").slice(pin.excerpt ? 1 : 0).flatMap(l => l.length <= 400 ? [l] : l.split(/(?<=[.!?;])\s+/))
+    .map((text, i) => ({ text, i })).filter(l => l.text.trim() && l.text.length <= 400);
+  const size = pin.size ?? tokens(pin.text);
+  const header = `[excerpt of user request ${pin.ref ?? "from an earlier checkpoint"}, ~${size} tokens; full text: jev_recall id]`;
+  const ranked = context ? [...lines.slice(0, 2), ...lines.slice(-2), ...lines.filter(l => MARKED.test(l.text)), ...lines.filter(l => SALIENT.test(l.text))]
+    : lines.filter(l => MARKED.test(l.text));
+  const kept = new Set();
+  let used = tokens(header);
+  for (const l of ranked) if (!kept.has(l) && used + tokens(l.text) + 1 <= max) { kept.add(l); used += tokens(l.text) + 1; }
+  return { text: [header, ...[...kept].sort((a, b) => a.i - b.i).map(l => l.text)].join("\n"), ref: pin.ref, hash: pin.hash, size, excerpt: true };
+}
+// Used only when verbatim requests cannot fit the reclaim budget. Every request first keeps its
+// marked lines (NOTE, CORRECTION, must, never...), then the newest ones get context or full text.
+export function boundPins(pins) {
+  const sources = pins.filter(p => !p.omitted);
+  const fit = (p, max, context) => tokens(p.text) <= max ? p : excerptPin(p, max, context);
+  const out = new Map();
+  let room = LIMITS.pinTokens;
+  const newestFirst = [...sources.keys()].reverse();
+  for (const i of newestFirst) {
+    const p = fit(sources[i], LIMITS.pinTokensMin, false);
+    if (tokens(p.text) <= room) { out.set(i, p); room -= tokens(p.text); }
+  }
+  for (const i of newestFirst) {
+    if (!out.has(i)) continue;
+    const better = fit(sources[i], LIMITS.pinTokensEach, true), extra = tokens(better.text) - tokens(out.get(i).text);
+    if (extra > 0 && extra <= room) { out.set(i, better); room -= extra; }
+  }
+  const omitted = pins.reduce((n, p) => n + (p.omitted ?? 0), 0) + sources.length - out.size;
+  const kept = [...out.keys()].sort((a, b) => a - b).map(i => out.get(i));
+  return omitted ? [{ text: `[${omitted} older user request(s) omitted from this checkpoint; search them with jev_recall]`, omitted }, ...kept] : kept;
+}
 function renderQuote(c) { return `[${c.ref}; ${c.role}]\n${c.text}`; }
 function checkpoint(pins, body, files = "") {
-  return `Session checkpoint. Earlier raw messages remain in Pi's session. Use jev_recall to verify missing details; excerpts are incomplete evidence.\n\nUser requests (verbatim, historical; later requests take precedence):\n${pins.map(p => p.text).join("\n\n---\n\n")}\n\n${body}${files}`;
+  return `Session checkpoint. Earlier raw messages remain in Pi's session. Use jev_recall to verify missing details; excerpts are incomplete evidence.\n\nUser requests (verbatim unless labelled as an excerpt; historical; later requests take precedence):\n${pins.map(p => p.text).join("\n\n---\n\n")}\n\n${body}${files}`;
 }
 function previousState(event) {
   const latest = [...event.branchEntries].reverse().find(e => e.type === "compaction");
@@ -38,9 +77,10 @@ export function makePlan(event, activeGoal) {
     const ref = sourceIds.get(JSON.stringify(message)) ?? "projected-message";
     if (message.role === "user" || message.role === "custom" || message.role === "branchSummary") {
       if (text) {
-        const previous = pins.findIndex(p => p.text === text);
+        const hash = digest(text);
+        const previous = pins.findIndex(p => (p.hash ?? digest(p.text)) === hash);
         if (previous >= 0) pins.splice(previous, 1);
-        pins.push({ text });
+        pins.push({ text, ref, hash });
       }
     } else {
       for (const textPart of excerpts(text)) candidates.push({ ref, role: message.role, text: textPart });
@@ -94,6 +134,9 @@ export async function compact(event, { summarize, key, fetchImpl, activeGoal, no
   const plan = makePlan(event, activeGoal);
   plan.maxCheckpointTokens = Math.floor(Math.min(plan.removed * 0.7, plan.removed - LIMITS.minSavedTokens));
   if (plan.removed < LIMITS.minSavedTokens) return { cancel: true, reason: "too_little_to_reclaim" };
+  const verbatimPins = plan.pins;
+  const bound = () => { plan.pins = boundPins(verbatimPins); };
+  if (tokens(checkpoint(plan.pins, "", plan.files)) > plan.maxCheckpointTokens) bound();
   if (tokens(checkpoint(plan.pins, "", plan.files)) > plan.maxCheckpointTokens) return { cancel: true, reason: "protected_text_exceeds_budget" };
   const decision = await select(plan.candidates, plan.goal, { key, signal: event.signal, fetchImpl });
   const evidence = plan.candidates.filter((_, i) => decision.choices[i] !== "ARCHIVE");
@@ -122,6 +165,7 @@ export async function compact(event, { summarize, key, fetchImpl, activeGoal, no
   } else if (summarize) summaryStatus = "input_budget";
   event.signal?.throwIfAborted();
   result ??= exactFallback(plan, evidence, exact);
+  if (!result && plan.pins === verbatimPins) { bound(); result = exactFallback(plan, evidence, exact); }
   if (!result) return { cancel: true, reason: "fallback_exceeds_budget" };
   const after = tokens(result.summary);
   if (plan.removed - after < LIMITS.minSavedTokens || after > plan.removed * 0.7)
@@ -131,7 +175,7 @@ export async function compact(event, { summarize, key, fetchImpl, activeGoal, no
     tokensBefore: event.preparation.tokensBefore, usage,
     details: { engine: MARKER, readFiles: plan.readFiles, modifiedFiles: plan.modifiedFiles,
       state: { pins: plan.pins, brief: result.brief, evidence: result.evidence },
-      metrics: { mode: result.mode, jev: decision.status, jevRequests: decision.requests, jevInputTokens: decision.inputTokens,
+      metrics: { mode: result.mode, jev: decision.status, pins: plan.pins === verbatimPins ? "verbatim" : "bounded", jevRequests: decision.requests, jevInputTokens: decision.inputTokens,
         summary: summaryStatus, summaryInputEstimate: tokens(prompt), checkpointEstimate: after,
         checkpointTarget: LIMITS.checkpointTokens, checkpointBudget: result.budget ?? LIMITS.checkpointTokens,
         adaptiveBudget: after > LIMITS.checkpointTokens,

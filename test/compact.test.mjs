@@ -71,10 +71,34 @@ test('summary failure retains prior checkpoint and KEEP evidence',async()=>{
   assert.equal(r.compaction.details.metrics.mode,'extractive');assert(r.compaction.summary.includes('balance=17'));
   for (const c of makePlan(e).candidates) assert(r.compaction.summary.includes(c.text));
 });
-test('oversized protected text cancels before API calls',async()=>{
+test('an oversized user request becomes a labelled excerpt instead of blocking compaction',async()=>{
   const e=fixture(0);e.preparation.messagesToSummarize[0].content='Do not remove this constraint. '.repeat(600);
+  const r=await compact(e,{key:'fake',fetchImpl:()=>assert.fail('network')});
+  assert(r.compaction);assert.equal(r.compaction.details.metrics.pins,'bounded');
+  assert(r.compaction.summary.includes('[excerpt of user request e0, ~'));assert(r.compaction.summary.includes('Do not remove this constraint.'));
+  assert(tokens(r.compaction.summary)<=LIMITS.pinTokensEach+200);
+});
+test('protected text that cannot fit even as an excerpt still cancels before API calls',async()=>{
+  const e=fixture(0);e.preparation.messagesToSummarize[0].content='x'.repeat(2400);
+  e.preparation.fileOps={written:Array.from({length:200},(_,i)=>`/srv/generated/file-${i}.py`)};
   const r=await compact(e,{key:'fake',fetchImpl:()=>assert.fail('network'),summarize:()=>assert.fail('summary')});
   assert.equal(r.reason,'protected_text_exceeds_budget');assert(r.cancel);
+});
+test('pasted user turns keep their marked lines across repeated compactions',async()=>{
+  // Shape of a long session of pasted files: ~6k-token user turns with facts in the middle.
+  const filler=n=>Array.from({length:n},(_,i)=>`    value_${i} = compute(value_${i-1}, ${i})  # routine line`).join('\n');
+  let previous,turn=0;const notes=[];
+  for(let round=0;round<3;round++){
+    const messages=[];
+    for(let k=0;k<6;k++){turn++;const note=`# NOTE: the access code for key-${turn} is CODE${turn}X.`;notes.push(note);
+      messages.push({role:'user',content:`Part ${turn}:\n${filler(150)}\n${note}\n${filler(150)}`},{role:'assistant',content:[{type:'text',text:`ACK part ${turn}`}]});}
+    const e={signal:new AbortController().signal,preparation:{messagesToSummarize:messages,turnPrefixMessages:[],tokensBefore:80000,firstKeptEntryId:'tail',previousSummary:previous?.summary},
+      branchEntries:[...(previous?[{type:'compaction',summary:previous.summary,details:previous.details}]:[]),...messages.map((message,i)=>({type:'message',id:`r${round}m${i}`,message}))]};
+    const r=await compact(e);assert(r.compaction,JSON.stringify(r));previous=r.compaction;
+    assert.equal(previous.details.metrics.pins,'bounded');
+    for(const note of notes) assert(previous.summary.includes(note),`lost ${note} in round ${round}`);
+  }
+  assert(tokens(previous.summary)<=LIMITS.pinTokens+LIMITS.checkpointTokens);
 });
 test('small compactions are rejected',async()=>{assert.equal((await compact(fixture(0))).reason,'too_little_to_reclaim')});
 test('recall recovers originals completely via pagination and rejects foreign IDs',()=>{

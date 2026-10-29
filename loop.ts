@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { rmSync } from "node:fs";
+import { modelMatches } from "./config.ts";
 
 const canonical = value => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(k => [k, item[k]])) : item);
 export const callKey = (name, input) => `${name}:${canonical(input)}`;
 
-export function withoutReplayedThinking(messages, model) {
-  if (!["home-qwen", "home-qwen-remote"].includes(model?.provider) || model?.id !== "orcarouter-qwen3.8-27b") return messages;
+export function withoutReplayedThinking(messages, model, patterns = []) {
+  if (!modelMatches(patterns, model)) return messages;
   // Only the request projection changes. Keep the raw trace for display/archive,
   // and keep every tool call/result and visible assistant response unchanged.
   return messages.map(m => m.role === "assistant" && Array.isArray(m.content)
