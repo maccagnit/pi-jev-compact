@@ -1,0 +1,14 @@
+{
+  "name": "pi-jev-compact",
+  "version": "0.2.2",
+  "private": true,
+  "type": "module",
+  "description": "Bounded Jev-assisted compaction with native Pi history recovery",
+  "pi": { "extensions": ["./index.ts", "./loop-guard.ts"] },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:integration": "node scripts/integration.mjs && node scripts/init-integration.mjs && node scripts/reload-integration.mjs && node scripts/loop-integration.mjs",
+    "test:live": "node scripts/live-jev.mjs"
+  },
+  "engines": { "node": ">=22.19.0" }
+}
