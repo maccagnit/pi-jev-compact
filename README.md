@@ -9,7 +9,7 @@ The default compaction mode makes no generative LLM call: at most one Jev reques
 
 ## Install
 
-Requires Node ≥ 22.19. Version 0.3.0 is verified on Pi 1.4.0; earlier releases were verified on 0.87.1 and 1.0.2.
+Requires Node ≥ 22.19. Version 0.3.x is verified on Pi 1.4.0; earlier releases were verified on 0.87.1 and 1.0.2.
 
 ```sh
 pi install git:github.com/maccagnit/pi-jev-compact        # or: pi install https://github.com/maccagnit/pi-jev-compact
@@ -81,7 +81,7 @@ The model gets one tool, `jev_recall`. It takes `query` (case-insensitive substr
 ## How a compaction works
 
 1. Pi's `session_before_compact` hook supplies the messages to replace and the boundary. Pi chooses the boundary, so tool calls and their results stay together.
-2. User requests in the replaced span are pinned verbatim and carried across later compactions, newest last. If the verbatim pins can't fit the reclaim budget, they're bounded instead (0.3.0). Each request keeps its complete lines that start with NOTE, CORRECTION, IMPORTANT, must, never, do not, TODO and similar markers. The newest requests then get their first and last lines, or their full text, within 2,400 estimated tokens. Excerpts are labelled with the source entry id. Requests that don't fit are counted, and stay reachable through `jev_recall`.
+2. User requests in the replaced span are pinned verbatim and carried across later compactions, newest last, while they total ≤ 2,400 estimated tokens. Beyond that they're bounded (0.3.1): requests with marker lines keep those lines first, so early facts aren't evicted by later chatter. Each request keeps its complete lines that start with NOTE, CORRECTION, IMPORTANT, must, never, do not, TODO and similar markers. The newest requests then get their first and last lines, or their full text, within 2,400 estimated tokens. Excerpts are labelled with the source entry id. Requests that don't fit are counted, and stay reachable through `jev_recall`.
 3. Up to 8 evidence excerpts (complete lines, ≤ 800 characters each) are chosen locally: recent material, matches with the current request, errors and decisions.
 4. With a key, Jev classifies each excerpt as KEEP / SUMMARIZE / ARCHIVE / UNCERTAIN. ARCHIVE is applied only at probability ≥ 0.9. Only the shortened current request and the excerpts are sent, after best-effort credential redaction (PEM keys, bearer/basic auth, `key/token/password/secret` assignments including JSON, `sk-`/`ts_`, AWS, GitHub, Slack, Google keys, JWTs, URL credentials). This is not a DLP guarantee.
 5. The checkpoint targets 2,400 estimated tokens (UTF-8 bytes / 3, about 25% above real tokens for code). It may grow to carry an earlier summary intact, but it must always free ≥ 512 tokens and ≥ 30% of the span it replaces.
@@ -94,7 +94,7 @@ This is a one-off rescue for a session that is already too large. It makes two l
 ## Known limits
 
 - An extractive checkpoint loses active context. The originals can be recovered, but the model has to ask for them.
-- Verbatim pins can make a checkpoint as large as 70% of what it replaces when that still fits. That frees less space than a summary and compacts more often.
+- Unmarked details in old user requests can leave the checkpoint once the 2,400-token pin cap is reached; they stay recoverable through `jev_recall`.
 - `summary` mode has never produced an accepted summary from a local Qwen within its 20 s limit. Keep `fast` unless your model is fast.
 - Deleting the session file deletes the recoverable originals. `--no-session` sessions keep them only in memory.
 - Verified on macOS. Windows and Linux are not verified.
