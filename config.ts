@@ -4,8 +4,10 @@ import { join } from "node:path";
 
 // Optional per-machine settings in <Pi agent dir>/pi-jev-compact.json. A missing file means defaults.
 export const CONFIG_FILE = "pi-jev-compact.json";
-const DEFAULTS = Object.freeze({ stripThinkingModels: [], typesafeApiKeyFile: undefined });
 const expand = path => path.replace(/^~(?=\/|$)/, homedir());
+// Conventional key location, so a new machine needs only this file (chmod 600) and no config.
+export const DEFAULT_KEY_FILE = "~/.config/jev/typesafe.key";
+const DEFAULTS = Object.freeze({ stripThinkingModels: [], typesafeApiKeyFile: expand(DEFAULT_KEY_FILE) });
 
 export function loadConfig(agentDir) {
   let raw;
@@ -16,7 +18,7 @@ export function loadConfig(agentDir) {
   }
   return {
     stripThinkingModels: Array.isArray(raw?.stripThinkingModels) ? raw.stripThinkingModels.filter(p => typeof p === "string") : [],
-    typesafeApiKeyFile: typeof raw?.typesafeApiKeyFile === "string" ? expand(raw.typesafeApiKeyFile) : undefined,
+    typesafeApiKeyFile: typeof raw?.typesafeApiKeyFile === "string" ? expand(raw.typesafeApiKeyFile) : DEFAULTS.typesafeApiKeyFile,
   };
 }
 
@@ -27,7 +29,11 @@ export function resolveKey(config, env = process.env) {
   try {
     const key = readFileSync(config.typesafeApiKeyFile, "utf8").trim();
     return { key: key || undefined, source: key ? "file" : "file_empty" };
-  } catch { return { key: undefined, source: "file_unreadable" }; }
+  } catch (error) {
+    // An absent default file just means "no key"; an explicitly configured one is reported.
+    if (error?.code === "ENOENT" && config.typesafeApiKeyFile === DEFAULTS.typesafeApiKeyFile) return { key: undefined, source: "none" };
+    return { key: undefined, source: "file_unreadable" };
+  }
 }
 
 // Patterns are "provider/model-id"; "*" matches any run of characters.

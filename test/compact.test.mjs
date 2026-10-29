@@ -186,6 +186,7 @@ test('config: missing file gives defaults, a broken file is reported, globs matc
   const dir=await mkdtemp(join(tmpdir(),'jev-config-'));
   try {
     assert.deepEqual(loadConfig(dir).stripThinkingModels,[]);
+    assert.equal(loadConfig(dir).typesafeApiKeyFile,join((await import('node:os')).homedir(),'.config/jev/typesafe.key'));
     await writeFile(join(dir,CONFIG_FILE),'{broken');assert.match(loadConfig(dir).error,/pi-jev-compact\.json/);
     await writeFile(join(dir,'key'),'  ts_file_key_value\n');
     await writeFile(join(dir,CONFIG_FILE),JSON.stringify({stripThinkingModels:['home-qwen*/orcarouter-*'],typesafeApiKeyFile:join(dir,'key')}));
@@ -197,6 +198,8 @@ test('config: missing file gives defaults, a broken file is reported, globs matc
     assert.deepEqual(resolveKey(config,{TYPESAFE_API_KEY:'from-env'}),{key:'from-env',source:'env'});
     assert.equal(resolveKey({...config,typesafeApiKeyFile:join(dir,'missing')},{}).source,'file_unreadable');
     assert.equal(resolveKey({stripThinkingModels:[]},{}).source,'none');
+    // The default file is optional: absent means no key, not an error. (Path forced to a missing file.)
+    assert.equal(resolveKey({...loadConfig(join(dir,'nowhere')),typesafeApiKeyFile:join(dir,'x')},{}).source,'file_unreadable');
   } finally { await rm(dir,{recursive:true,force:true}); }
 });
 test('redaction covers JSON keys and common provider token formats',()=>{
