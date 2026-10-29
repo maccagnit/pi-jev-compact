@@ -3,8 +3,15 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Bounded Jev-assisted compaction with native Pi history recovery",
+  "description": "Bounded Jev-assisted compaction with native Pi history recovery, plus a repeated tool-failure guard",
+  "keywords": ["pi-package", "pi-extension", "compaction", "context"],
+  "license": "MIT",
+  "author": "Tommaso Maccagni",
   "pi": { "extensions": ["./index.ts", "./loop-guard.ts"] },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:integration": "node scripts/integration.mjs && node scripts/init-integration.mjs && node scripts/reload-integration.mjs && node scripts/loop-integration.mjs",

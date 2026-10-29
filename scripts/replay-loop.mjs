@@ -33,10 +33,11 @@ try {
     const agentDir = join(homedir(), '.pi/agent');
     const runtime = await sdk.ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json'),
       modelsStorePath: join(dir, 'models.json'), refreshOnCreate: false });
-    const model = runtime.getModel('home-qwen', 'orcarouter-qwen3.8-27b'); assert(model);
+    const [provider, ...id] = (process.env.PI_JEV_LIVE_MODEL ?? '').split('/');
+    const model = runtime.getModel(provider, id.join('/')); assert(model, 'Set PI_JEV_LIVE_MODEL=provider/model-id');
     const started = Date.now();
     let messages = sdk.convertToLlm(projection.messages);
-    if (process.argv.includes('--drop-thinking')) messages = withoutReplayedThinking(messages, model);
+    if (process.argv.includes('--drop-thinking')) messages = withoutReplayedThinking(messages, model, ['*']);
     const response = await runtime.streamSimple(model, { messages },
       { reasoning: 'off', maxTokens: 3000, cacheRetention: 'none', signal: AbortSignal.timeout(90000) }).result();
     const nextCalls = response.content.filter(c => c.type === 'toolCall');

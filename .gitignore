@@ -3,3 +3,7 @@ node_modules/
 *.env
 .pi/
 .codebase-memory/
+__pycache__/
+bench/results/
+bench/pi-sessions/
+bench/logs_*.txt

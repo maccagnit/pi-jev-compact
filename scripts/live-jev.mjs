@@ -31,8 +31,9 @@ if (process.argv.includes('--with-summary')) {
   try {
     const agentDir=join(homedir(),'.pi','agent');
     const runtime=await sdk.ModelRuntime.create({authPath:join(agentDir,'auth.json'),modelsPath:join(agentDir,'models.json'),modelsStorePath:join(dir,'store.json'),refreshOnCreate:false});
-    const model=runtime.getModel('home-qwen','orcarouter-qwen3.8-27b');
-    assert(model,'Configured Qwen not found');
+    const [provider,...id]=(process.env.PI_JEV_LIVE_MODEL??'').split('/');
+    const model=runtime.getModel(provider,id.join('/'));
+    assert(model,'Set PI_JEV_LIVE_MODEL=provider/model-id for --with-summary');
     const messages=[{role:'user',content:'Fix /srv/ledger.py. Preserve account ID 0017. Do not deploy without approval.'}];
     for(let i=0;i<20;i++) messages.push({role:'toolResult',content:[{type:'text',text:`Test step ${i}\n`+'successful routine fixture check\n'.repeat(160)}]});
     messages.push(...candidates);

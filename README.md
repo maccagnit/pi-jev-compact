@@ -1,139 +1,114 @@
 # Pi Jev Compact
 
-## Protezione dai cicli ripetuti — 0.2.2
+A [Pi](https://github.com/earendil-works/pi) package with two independent extensions:
 
-`loop-guard.ts` è un'estensione separata, verificata su Pi **1.0.2**. Nell'installazione attuale è abilitata, mentre `index.ts` (il compattatore Jev) rimane disabilitato come scelto dall'utente. Entrambe si possono gestire separatamente da `pi config`.
+- **`index.ts`, the Jev compactor.** It replaces Pi's LLM-written compaction summary with a bounded, extractive checkpoint. User requests are kept verbatim, or as labelled excerpts when they're very large. Selected exact evidence is kept, and the [TypeSafe Jev](https://docs.typesafe.ai/introduction/quickstart) API optionally decides what to keep. The full history stays in Pi's session file, and the model can read it back with the `jev_recall` tool.
+- **`loop-guard.ts`, the repeated-failure guard.** It stops the 4th identical tool call after three identical errors and offers `/loop-recover`. It can also, optionally, drop stale `thinking` blocks from replayed history for the models you list.
 
-- Per i soli profili `home-qwen` e `home-qwen-remote`, modello `orcarouter-qwen3.8-27b`, esclude le vecchie analisi `thinking` dal contesto reinviato. Testo visibile, tool call/result e archivio originale restano intatti. Il modello continua a poter ragionare sulla nuova richiesta.
-- Dopo tre chiamate consecutive identiche con lo stesso risultato di errore, blocca la quarta con `terminate: true`. Riconosce anche `404: Not Found` prodotto da un comando che termina con exit code zero. Non è un rilevatore generico di ogni possibile ciclo: controlli riusciti, risultati diversi e nuove richieste dell'utente non vengono bloccati. Reload e compact non azzerano il conteggio, ricostruito dal ramo corrente.
-- `/loop-recover` crea e apre una copia dal primo risultato del ciclo. Conserva la prima chiamata con il suo risultato, la richiesta originale e tutto il lavoro precedente; aggiunge una nota per cambiare approccio. Le ripetizioni restano nell'archivio e nella sessione originale, ma non nel ramo attivo. Non esegue automaticamente altri tool.
+The default compaction mode makes no generative LLM call: at most one Jev request per compaction, and none when no key is configured. Italian version: [README.it.md](README.it.md).
 
-Per una sessione già aperta:
+## Install
 
-```text
-/reload
-/loop-recover
-```
-
-Poi inviare il messaggio con cui continuare. Il recupero richiede una sessione salvata e attende che Pi sia inattivo; non procede con messaggi in coda. L'indagine e i limiti della verifica sono in `INCIDENT-2026-10-04.md`.
-
-Il compattatore Jev è stato sviluppato per Pi 0.87.1 e verificato anche su 1.0.2. Quando abilitato, il default è **fast**: una chiamata Jev al momento della compattazione e un checkpoint composto da estratti originali. Nessuna chiamata generativa, proxy, database aggiuntivo, processo in background o richiesta API a ogni turno.
-
-## Funzionamento
-
-- Usa `session_before_compact`, sia per `/compact` sia per la compattazione automatica di Pi.
-- Pi decide il confine della cronologia recente: l'estensione lo conserva, senza separare le chiamate ai tool dai risultati.
-- Le richieste utente nel tratto compattato restano testuali, anche attraverso più compattazioni. Ripetizioni identiche vengono deduplicate mantenendo la precedenza più recente.
-- Conserva gli elenchi cumulativi dei file letti/modificati forniti da Pi.
-- Seleziona localmente fino a otto estratti di massimo 800 caratteri, privilegiando materiale recente, corrispondenze con la richiesta corrente ed errori/decisioni. Le righe troppo lunghe rimangono nell'originale, non vengono presentate come estratti completi.
-- Jev classifica gli estratti come KEEP, SUMMARIZE, ARCHIVE o UNCERTAIN. ARCHIVE viene applicato solo con probabilità almeno 0,90; KEEP e UNCERTAIN rimangono esatti. In modalità fast anche SUMMARIZE viene conservato come estratto, nei limiti del budget.
-- Il checkpoint ha un obiettivo ordinario di 2.400 token **stimati**. Dalla versione 0.1.1 il budget può crescere per conservare integralmente un riepilogo precedente o testo protetto più grande: deve comunque liberare almeno 512 token stimati e almeno il 30% del tratto sostituito. Le stime locali usano byte UTF-8 / 3, non il tokenizer del provider.
-- La cronologia originale resta nel JSONL di Pi. Il tool `jev_recall` cerca sul ramo corrente e permette di leggere gli originali con paginazione, anche dopo una riapertura.
-
-Jev riceve solo la richiesta corrente abbreviata e gli estratti limitati, tramite l'endpoint ufficiale TypeSafe. Si applica una redazione di credenziali comuni; non è una garanzia di anonimizzazione. Il resto del transcript non viene spedito a Jev.
-
-## Prova senza installazione globale
-
-Pi deve ricevere `TYPESAFE_API_KEY` nel proprio ambiente. L'estensione non legge automaticamente credenziali da Hermes. In assenza della chiave usa una selezione locale conservativa; `/jev-compact status` mostra se Jev è disponibile.
+Requires Pi ≥ 0.87.1 (verified on 0.87.1, 1.0.2 and 1.4.0) and Node ≥ 22.19.
 
 ```sh
-pi -e '/Users/tommymac/Desktop/Claude Proj/Pi-Jev-Compact/index.ts'
+pi install git:github.com/<owner>/pi-jev-compact        # or: pi install https://github.com/<owner>/pi-jev-compact
+pi install git:github.com/<owner>/pi-jev-compact@v0.3.0 # pinned to a tag
+pi install ./pi-jev-compact                             # from a local checkout (not copied)
 ```
 
-Usare una sessione nuova o una copia per la prima prova. Disabilitare prima `billion-context` e altri compattatori: solo uno deve gestire la compattazione. È presente un controllo dei tool attivi `compress`, `decompress`, `acp_status`, ma non può identificare ogni possibile compattatore esterno.
+Try it for one run without changing settings: `pi -e git:github.com/<owner>/pi-jev-compact`.
 
-Comandi dentro Pi:
+Both extensions are enabled after install. Toggle each one with `pi config` (select it, then press Space), then run `/reload` in open sessions.
 
-```text
-/jev-compact status
-/jev-compact init
-/compact
-/jev-compact summary
-/jev-compact fast
-/jev-compact off
-```
+**Use only one compactor.** Disable other compaction extensions (for example `billion-context`'s `pi-native.js`) before enabling `index.ts`. The extension stands down if it sees the `compress`/`decompress`/`acp_status` tools, but it can't detect every other compactor.
 
-`fast` è il default a ogni caricamento. `summary` aggiunge una sola chiamata al modello attivo di Pi: input massimo 6.000 token stimati, output massimo 1.000 token, timeout 20 secondi. Il riepilogo deve terminare regolarmente; citazioni testuali non supportate vengono respinte. Se fallisce, si torna agli estratti. Questa verifica non dimostra la correttezza di ogni parafrasi generata.
+## Configuration
 
-`off` restituisce la gestione al compattatore nativo di Pi per la sessione. Non esegue subito una compattazione. I comandi di modalità non cambiano le impostazioni globali.
+Everything is optional. With no configuration, the compactor runs in local mode and the loop guard filters no models.
 
-## Recuperare una sessione già molto carica
+### TypeSafe Jev key
 
-```text
-/reload
-/jev-compact init
-```
+The key is looked up at each compaction, in this order:
 
-`init` è il recupero straordinario della versione 0.2.0. Funziona anche immediatamente dopo un compact, quando Pi potrebbe rispondere `Already compacted`. Non usa i vincoli del compact ordinario e non può restituire `fallback_exceeds_budget`.
+1. The `TYPESAFE_API_KEY` environment variable of the Pi process.
+2. The file named by `typesafeApiKeyFile` in the config file below. The whole file is the key; surrounding whitespace is ignored.
 
-Dalla **0.2.1** tutti i moduli runtime sono `.ts`: i precedenti helper `.mjs` rimanevano nella cache ESM di Node anche dopo `/reload`, lasciando in esecuzione il vecchio init. La migrazione e le modifiche successive sono verificate nello stesso processo con il vero reload di Pi. `/jev-compact status` mostra `version: "0.2.1"`; le notifiche init riportano `Jev init v0.2.1`. Per caricare questa correzione nel processo già aperto occorre un reload dopo l'aggiornamento dei file.
-
-Esegue due passaggi **locali**, senza chiamate Jev o generative: seleziona frammenti per blocchi della cronologia visibile, poi li riunisce in un checkpoint entro 2.400 token stimati. Privilegia richiesta corrente, vincoli, errori e lavoro pendente. Le vecchie richieste, i riepiloghi e gli elenchi di file molto lunghi vengono condensati: non sono tutti mantenuti testualmente nel prompt attivo. Ogni estratto riporta l'ID della fonte; il testo completo rimane recuperabile con `jev_recall`. I frammenti sono indicati come incompleti, non come un riepilogo semanticamente completo.
-
-Prova confini recenti progressivamente più piccoli, fino a conservare solo il checkpoint se un singolo ultimo risultato tool è enorme. Chiamate e risultati vengono conservati o archiviati insieme. L'obiettivo del contesto totale è il **45% della finestra del modello**: è una stima che include prompt di sistema/strumenti senza contarli due volte. Se questi da soli impediscono il raggiungimento del target, applica comunque la riduzione utile e lo segnala. Il target non annulla il recupero.
-
-Per usare le API di Pi senza scrivere nella sessione attiva, `init` crea una copia con un nuovo ID e riferimento alla sessione originale; Pi la apre automaticamente dopo la verifica su disco. La copia contiene l'intera cronologia originale, non soltanto il checkpoint. La sessione precedente rimane disponibile in `/resume`. La gestione ordinaria riparte in modalità fast, con le impostazioni globali di compact invariate. Ripetere `init` su un contesto già piccolo non crea altre copie.
-
-Il comando richiede una sessione salvata e un modello con finestra nota. Attende la fine della risposta corrente e non sostituisce una sessione con messaggi ancora in coda. `off` e il controllo dei compattatori concorrenti valgono anche per `init`. Il percorso è verificato su Pi 0.87.1; usa la funzione interna `prepareCompaction` per rispettare la proiezione e i confini scelti da Pi, più le API pubbliche per creare/aprire la copia.
-
-Per un'installazione persistente, dopo la prova:
+A key file is the more reliable choice: it works in the TUI, in `pi -p`, and when Pi is started by another tool that doesn't inherit your shell's environment. Keep it private:
 
 ```sh
-pi install '/Users/tommymac/Desktop/Claude Proj/Pi-Jev-Compact'
+mkdir -p ~/.config/typesafe && umask 077 && printf '%s' 'YOUR_KEY' > ~/.config/typesafe/key
 ```
 
-Per rimuovere l'installazione persistente:
+`/jev-compact status` shows where the key came from (`jevKey`: `env`, `file`, `none`, `file_empty` or `file_unreadable`). Each checkpoint records what happened in `details.metrics.jev`: `ok`, `missing_key`, `timeout`, `unavailable` or `input_budget`. Without a key, the extension keeps every selected excerpt (local mode).
 
-```sh
-pi remove '/Users/tommymac/Desktop/Claude Proj/Pi-Jev-Compact'
-```
+### Config file
 
-Il pacchetto è registrato nelle impostazioni globali del Mac. Stato attuale: `loop-guard.ts` abilitato, `index.ts` disabilitato. In `pi config`, selezionare il singolo modulo e premere Spazio per abilitarlo/disabilitarlo; Esc chiude. Il toggle del compattatore è stato verificato in entrambe le direzioni. Per una sessione Pi già aperta usare `/reload` dopo la modifica. `billion-context` resta disabilitato.
-
-## Quanto contesto recente conservare
-
-La compattazione ordinaria rispetta `compaction.keepRecentTokens` di Pi, il cui default è 20.000. Solo `init` sceglie un confine più profondo per quella singola operazione. Per una finestra da 65.536 token, il test d'integrazione ordinario usa questa configurazione più aggressiva:
+Path: `<Pi agent dir>/pi-jev-compact.json`, normally `~/.pi/agent/pi-jev-compact.json`; `PI_CODING_AGENT_DIR` moves it. It's read when the extension loads, so run `/reload` after editing it.
 
 ```json
 {
-  "compaction": {
-    "enabled": true,
-    "reserveTokens": 16384,
-    "keepRecentTokens": 8000
-  }
+  "typesafeApiKeyFile": "~/.config/typesafe/key",
+  "stripThinkingModels": ["my-llama-cpp/qwen*"]
 }
 ```
 
-È un frammento da integrare nelle impostazioni della sessione/progetto desiderato, non da sostituire all'intero file esistente. L'installazione ha aggiunto solo il pacchetto a `~/.pi/agent/settings.json`; i parametri di compattazione non sono stati modificati. Il contesto totale dopo il compact comprende anche il prompt di sistema, gli strumenti e il tratto recente; l'obiettivo 2.400 riguarda solo il checkpoint e non garantisce una percentuale fissa sul totale.
+| Key | Default | Meaning |
+|---|---|---|
+| `typesafeApiKeyFile` | none | File holding the TypeSafe key, used when `TYPESAFE_API_KEY` is unset. `~` is expanded. |
+| `stripThinkingModels` | `[]` | `provider/model-id` patterns (`*` wildcard). For these models, the loop guard drops earlier `thinking` blocks from the request projection. The saved session is unchanged. This helped a local Qwen escape a 112-call retry loop (see [docs/INCIDENT-2026-10-04.md](docs/INCIDENT-2026-10-04.md)). |
 
-## Limiti deliberati
+A malformed file never stops Pi from starting: defaults apply, and `/jev-compact status` reports `configError`.
 
-La selezione di otto estratti è una riduzione con perdita di contesto attivo. Gli originali sono recuperabili, ma non c'è garanzia che il modello li richieda sempre. La riduzione della cronologia recente è un compromesso fra costo e continuità.
+### Pi's own compaction settings
 
-Se un checkpoint personalizzato non può conservare il materiale obbligatorio e liberare abbastanza spazio, l'estensione restituisce il controllo alla compattazione nativa di Pi nella stessa richiesta. Non provoca `Compaction cancelled` per un limite interno di budget. Lo stesso fallback vale per gli errori dell'estensione; una cancellazione esplicita dell'utente resta una cancellazione. Il fallback nativo comporta la normale chiamata di riepilogo di Pi, con i suoi costi, limiti e possibili errori del provider.
+Ordinary compaction keeps Pi's trigger and boundary: it compacts when context exceeds `contextWindow − compaction.reserveTokens` (default 16,384), and keeps the last `compaction.keepRecentTokens` (default 20,000). For a 98,304-token window that means compacting at about 82k and resuming at about 25–30k (system prompt, tools, checkpoint and recent tail). For smaller windows, lower `keepRecentTokens` in `settings.json`, for example to 8000 for a 64k window.
 
-La versione 0.1.0 falliva passando da un riepilogo nativo maggiore di 2.400 token alla modalità fast. La 0.1.1 è stata verificata su una copia di una sessione reale con un riepilogo precedente di 21.132 caratteri, conservandolo integralmente. Per aggiornare una sessione già aperta: `/reload`, quindi `/compact`.
+## Commands and tool
 
-Nessuna riscrittura distruttiva della cronologia e nessun equivalente che reinserisca tutto il transcript nel prompt. `jev_recall` recupera pagine mirate. L'archivio è il file di sessione Pi: eliminandolo si eliminano anche gli originali recuperabili. Nelle sessioni `--no-session` il recupero dura solo quanto la sessione in memoria.
-
-Verificato su macOS con Pi 0.87.1. Windows e altre versioni non sono stati verificati. Non è stato eseguito un confronto controllato con `billion-context` su una sessione reale.
-
-## Verifica
-
-```sh
-npm test
-PI_PACKAGE_DIR=/Users/tommymac/.local/lib/node_modules/@earendil-works/pi-coding-agent npm run test:integration
-npm run test:live
+```text
+/jev-compact status    version, mode, key source, conflicts, metrics of the last checkpoint
+/jev-compact fast      default: extractive checkpoint, no generative call
+/jev-compact summary   add one bounded summary call to the active model (falls back to fast)
+/jev-compact off       hand compaction back to Pi for this process (on re-enables)
+/jev-compact init      one-off rescue of an already oversized session (see below)
+/compact               Pi's normal command; uses the Jev checkpoint while enabled
+/loop-recover          continue from before a repeated-failure loop, in a preserved copy
 ```
 
-Il test live richiede `TYPESAFE_API_KEY` e spedisce esclusivamente dati sintetici. Per aggiungere il test opzionale sul Qwen configurato nel Mac:
+The model gets one tool, `jev_recall`. It takes `query` (case-insensitive substring, 6 matches per page) or `id` (the raw entry, in 4,000-character pages), plus `offset` for paging. It works on the current branch, also after reopening a session.
+
+## How a compaction works
+
+1. Pi's `session_before_compact` hook supplies the messages to replace and the boundary. Pi chooses the boundary, so tool calls and their results stay together.
+2. User requests in the replaced span are pinned verbatim and carried across later compactions, newest last. If the verbatim pins can't fit the reclaim budget, they're bounded instead (0.3.0). Each request keeps its complete lines that start with NOTE, CORRECTION, IMPORTANT, must, never, do not, TODO and similar markers. The newest requests then get their first and last lines, or their full text, within 2,400 estimated tokens. Excerpts are labelled with the source entry id. Requests that don't fit are counted, and stay reachable through `jev_recall`.
+3. Up to 8 evidence excerpts (complete lines, ≤ 800 characters each) are chosen locally: recent material, matches with the current request, errors and decisions.
+4. With a key, Jev classifies each excerpt as KEEP / SUMMARIZE / ARCHIVE / UNCERTAIN. ARCHIVE is applied only at probability ≥ 0.9. Only the shortened current request and the excerpts are sent, after best-effort credential redaction (PEM keys, bearer/basic auth, `key/token/password/secret` assignments including JSON, `sk-`/`ts_`, AWS, GitHub, Slack, Google keys, JWTs, URL credentials). This is not a DLP guarantee.
+5. The checkpoint targets 2,400 estimated tokens (UTF-8 bytes / 3, about 25% above real tokens for code). It may grow to carry an earlier summary intact, but it must always free ≥ 512 tokens and ≥ 30% of the span it replaces.
+6. If no valid checkpoint can be built (for example too little to reclaim) or the extension fails, Pi's native compaction runs in the same request. Only a user abort cancels. Each fall-through is saved in the session as a `pi-jev-compact-fallback` custom entry (not sent to the model) with the reason, because notices aren't visible in `pi -p`.
+
+### `/jev-compact init`
+
+This is a one-off rescue for a session that is already too large. It makes two local passes (no API calls) and builds a fragment checkpoint aimed at 45% of the window. It then writes it into a **copy** of the session and switches to it; the original stays in `/resume`. It needs a saved session, an idle agent and a model with a known context window. It uses Pi's internal `prepareCompaction` (`dist/core/compaction/compaction.js`), which isn't part of the public API: a future Pi release may break `init` without affecting ordinary compaction.
+
+## Known limits
+
+- An extractive checkpoint loses active context. The originals can be recovered, but the model has to ask for them.
+- Verbatim pins can make a checkpoint as large as 70% of what it replaces when that still fits. That frees less space than a summary and compacts more often.
+- `summary` mode has never produced an accepted summary from a local Qwen within its 20 s limit. Keep `fast` unless your model is fast.
+- Deleting the session file deletes the recoverable originals. `--no-session` sessions keep them only in memory.
+- Verified on macOS. Windows and Linux are not verified.
+
+## Development
 
 ```sh
-PI_PACKAGE_DIR=/Users/tommymac/.local/lib/node_modules/@earendil-works/pi-coding-agent node scripts/live-jev.mjs --with-summary
+npm test                                   # unit tests, no network
+PI_PACKAGE_DIR="$(npm root -g)/@earendil-works/pi-coding-agent" npm run test:integration
+TYPESAFE_API_KEY=... npm run test:live     # synthetic data only; sends to TypeSafe
 ```
 
-`PI_PACKAGE_DIR` indica il pacchetto Pi già installato. È necessario se `npm root -g` punta a una diversa installazione Node. Non serve installare dipendenze runtime aggiuntive.
+`PI_PACKAGE_DIR` points at the installed Pi. The tests run against a temporary Pi agent dir, never your real config or key file. `bench/` holds the long-session benchmark ([bench/README.md](bench/README.md)). Measurement history: [docs/VALIDATION.md](docs/VALIDATION.md) and [docs/REVIEW-2026-10-29.md](docs/REVIEW-2026-10-29.md).
 
-Risultati e limiti delle misurazioni: [VALIDATION.md](VALIDATION.md).
+## License
 
-Fonti delle API: [compattazione Pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/compaction.md), [TypeSafe API](https://docs.typesafe.ai/introduction/quickstart). L'idea di separare decisioni Jev, protezione deterministica e recupero riprende il progetto locale Hermes-Jev-Context; il runtime Hermes non viene importato o modificato.
+MIT, see [LICENSE](LICENSE).
