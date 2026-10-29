@@ -89,7 +89,8 @@ try {
   const nativeResult=await session.compact();
   assert(nativeResult.summary);assert.notEqual(nativeResult.details.engine,MARKER);assert.equal(calls,2);
   assert.equal(fallbackManager.getBranch().filter(e=>e.type==='compaction').length,1);
-  assert.equal(outputLimits[0],1000);assert.equal(outputLimits[1],4096);
+  // Pi <1.4 passed the model maxTokens to native summaries; 1.4 leaves it to the provider.
+  assert.equal(outputLimits[0],1000);assert([4096,undefined].includes(outputLimits[1]));
   // Only a user's actual abort cancels the host; ordinary exceptions fall through.
   const extension=fallbackSession.extensionsResult.extensions.find(e=>e.tools.has('jev_recall'));
   const hook=extension.handlers.get('session_before_compact')[0];
