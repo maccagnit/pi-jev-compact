@@ -12,12 +12,12 @@ The default compaction mode makes no generative LLM call: at most one Jev reques
 Requires Node ≥ 22.19. Version 0.3.0 is verified on Pi 1.4.0; earlier releases were verified on 0.87.1 and 1.0.2.
 
 ```sh
-pi install git:github.com/<owner>/pi-jev-compact        # or: pi install https://github.com/<owner>/pi-jev-compact
-pi install git:github.com/<owner>/pi-jev-compact@v0.3.0 # pinned to a tag
+pi install git:github.com/maccagnit/pi-jev-compact        # or: pi install https://github.com/maccagnit/pi-jev-compact
+pi install git:github.com/maccagnit/pi-jev-compact@v0.3.0 # pinned to a tag
 pi install ./pi-jev-compact                             # from a local checkout (not copied)
 ```
 
-Try it for one run without changing settings: `pi -e git:github.com/<owner>/pi-jev-compact`.
+Try it for one run without changing settings: `pi -e git:github.com/maccagnit/pi-jev-compact`.
 
 Both extensions are enabled after install. Toggle each one with `pi config` (select it, then press Space), then run `/reload` in open sessions.
 

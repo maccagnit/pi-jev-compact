@@ -12,8 +12,8 @@ La modalità predefinita non fa chiamate generative: al massimo una richiesta Je
 Richiede Node ≥ 22.19. La versione 0.3.0 è verificata su Pi 1.4.0; le versioni precedenti su 0.87.1 e 1.0.2.
 
 ```sh
-pi install git:github.com/<owner>/pi-jev-compact        # oppure: pi install https://github.com/<owner>/pi-jev-compact
-pi install git:github.com/<owner>/pi-jev-compact@v0.3.0 # fissato a un tag
+pi install git:github.com/maccagnit/pi-jev-compact        # oppure: pi install https://github.com/maccagnit/pi-jev-compact
+pi install git:github.com/maccagnit/pi-jev-compact@v0.3.0 # fissato a un tag
 pi install ./pi-jev-compact                             # da una copia locale (non viene copiata)
 ```
 

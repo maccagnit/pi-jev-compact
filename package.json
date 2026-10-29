@@ -7,6 +7,9 @@
   "keywords": ["pi-package", "pi-extension", "compaction", "context"],
   "license": "MIT",
   "author": "Tommaso Maccagni",
+  "repository": { "type": "git", "url": "git+https://github.com/maccagnit/pi-jev-compact.git" },
+  "homepage": "https://github.com/maccagnit/pi-jev-compact#readme",
+  "bugs": { "url": "https://github.com/maccagnit/pi-jev-compact/issues" },
   "pi": { "extensions": ["./index.ts", "./loop-guard.ts"] },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
