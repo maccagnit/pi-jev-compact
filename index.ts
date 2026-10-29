@@ -7,7 +7,7 @@ import { compact, recall, messageText, MARKER, LIMITS } from "./compact.ts";
 import { prepareInit } from "./init.ts";
 import { loadConfig, resolveKey } from "./config.ts";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 
 export default function (pi: ExtensionAPI) {
   let enabled = true;

@@ -174,9 +174,44 @@ test('migration: a large native summary is carried verbatim within the reclaim b
   assert(m.savedEstimate>=LIMITS.minSavedTokens);assert(m.checkpointEstimate<=m.removedEstimate*0.7);
   assert.equal(r.compaction.firstKeptEntryId,e.preparation.firstKeptEntryId);
 });
-test('migration: large user requests remain verbatim when enough other context is reclaimable',async()=>{
+test('requests above pinTokens are bounded even when they would fit the reclaim budget',async()=>{
   const e=fixture();e.preparation.messagesToSummarize[0].content='Exact user constraint. '.repeat(500);
-  const r=await compact(e);assert(r.compaction);assert(r.compaction.summary.includes(e.preparation.messagesToSummarize[0].content));
+  const r=await compact(e);assert(r.compaction);assert.equal(r.compaction.details.metrics.pins,'bounded');
+  assert(r.compaction.summary.includes('Exact user constraint.'));assert(!r.compaction.summary.includes(e.preparation.messagesToSummarize[0].content));
+});
+// Chains compactions the way Pi does: previous checkpoint becomes previousSummary + branch entry.
+async function chain(rounds,messagesFor){
+  let previous;const out=[];
+  for(let round=0;round<rounds;round++){
+    const messages=messagesFor(round);
+    const e={signal:new AbortController().signal,preparation:{messagesToSummarize:messages,turnPrefixMessages:[],tokensBefore:80000,firstKeptEntryId:'tail',previousSummary:previous?.summary,
+      fileOps:{read:new Set([`/repo/read-${round}.py`]),written:new Set(),edited:new Set(round%2?[]:[`/repo/edit-${round}.py`])}},
+      branchEntries:[...(previous?[{type:'compaction',summary:previous.summary,details:previous.details}]:[]),...messages.map((message,i)=>({type:'message',id:`c${round}m${i}`,message}))]};
+    const r=await compact(e);assert(r.compaction,JSON.stringify(r));previous=r.compaction;out.push(previous);
+  }
+  return out;
+}
+const routine=n=>Array.from({length:n},(_,i)=>`    step_${i} = run(step_${i-1})  # plain line`).join('\n');
+test('pins stay bounded across many compactions of short requests',async()=>{
+  const runs=await chain(30,round=>Array.from({length:6},(_,k)=>[{role:'user',content:`Request ${round}.${k}: please continue with the next module and keep the same style.`},
+    {role:'toolResult',content:[{type:'text',text:routine(400)}]}]).flat());
+  const pinTokens=r=>r.details.state.pins.reduce((n,p)=>n+tokens(p.text),0);
+  assert(runs.every(r=>pinTokens(r)<=LIMITS.pinTokens+40),runs.map(pinTokens).join());
+  // Grows until the pin cap (~compaction 15), then only the capped file list can add a little.
+  assert(tokens(runs.at(-1).summary)<=tokens(runs[19].summary)+300,'checkpoint must stop growing');
+});
+test('old marked requests outlive newer unmarked ones when pins are bounded',async()=>{
+  const runs=await chain(8,round=>[...(round===0?[{role:'user',content:'# NOTE: the deploy key id is K-77.'}]:[]),
+    ...Array.from({length:12},(_,k)=>({role:'user',content:`Round ${round}.${k}: ${routine(40)}`})),{role:'toolResult',content:[{type:'text',text:routine(400)}]}]);
+  assert(runs.at(-1).summary.includes('# NOTE: the deploy key id is K-77.'));
+  assert(runs.at(-1).summary.includes('older user request(s) omitted'));
+});
+test('file lists accumulate across Jev compactions and the checkpoint shows a bounded list',async()=>{
+  const runs=await chain(60,round=>[{role:'user',content:`Go on ${round}.`},{role:'toolResult',content:[{type:'text',text:routine(400)}]}]);
+  const d=runs.at(-1).details;
+  assert.equal(d.readFiles.length,60);assert.equal(d.modifiedFiles.length,30);assert(d.modifiedFiles.includes('/repo/edit-0.py'));
+  assert(runs.at(-1).summary.includes('more, listed in the compaction entry'));
+  assert(tokens(runs.at(-1).summary)<LIMITS.checkpointTokens+LIMITS.pinTokens);
 });
 test('config: missing file gives defaults, a broken file is reported, globs match provider/model',async()=>{
   const { mkdtemp, writeFile, rm } = await import('node:fs/promises');

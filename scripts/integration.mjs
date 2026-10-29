@@ -91,7 +91,7 @@ try {
   assert.equal(fallbackManager.getBranch().filter(e=>e.type==='compaction').length,1);
   // The fall-through is recorded in the session (notices are invisible in print/json mode).
   const record=fallbackManager.getBranch().find(e=>e.type==='custom'&&e.customType==='pi-jev-compact-fallback');
-  assert.deepEqual(record?.data,{version:'0.3.0',reason:'too_little_to_reclaim',jevKey:'none'});
+  assert.deepEqual(record?.data,{version:JSON.parse(await readFile(resolve('package.json'),'utf8')).version,reason:'too_little_to_reclaim',jevKey:'none'});
   // Pi <1.4 passed the model maxTokens to native summaries; 1.4 leaves it to the provider.
   assert.equal(outputLimits[0],1000);assert([4096,undefined].includes(outputLimits[1]));
   // Only a user's actual abort cancels the host; ordinary exceptions fall through.

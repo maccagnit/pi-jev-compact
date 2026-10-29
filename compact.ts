@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { select } from "./jev.ts";
 
-export const LIMITS = Object.freeze({ checkpointTokens: 2400, pinTokens: 2400, pinTokensEach: 600, pinTokensMin: 150, inputTokens: 6000, outputTokens: 1000, minSavedTokens: 512, summaryTimeoutMs: 20000 });
+export const LIMITS = Object.freeze({ checkpointTokens: 2400, pinTokens: 2400, filesShown: 40, pinTokensEach: 600, pinTokensMin: 150, inputTokens: 6000, outputTokens: 1000, minSavedTokens: 512, summaryTimeoutMs: 20000 });
 export const MARKER = "pi-jev-compact/v1";
 // Deliberately conservative and deterministic; telemetry labels these as estimates.
 export const tokens = text => Math.ceil(Buffer.byteLength(text, "utf8") / 3);
@@ -35,21 +35,23 @@ function excerptPin(pin, max, context) {
   for (const l of ranked) if (!kept.has(l) && used + tokens(l.text) + 1 <= max) { kept.add(l); used += tokens(l.text) + 1; }
   return { text: [header, ...[...kept].sort((a, b) => a.i - b.i).map(l => l.text)].join("\n"), ref: pin.ref, hash: pin.hash, size, excerpt: true };
 }
-// Used only when verbatim requests cannot fit the reclaim budget. Every request first keeps its
-// marked lines (NOTE, CORRECTION, must, never...), then the newest ones get context or full text.
+// Used when verbatim requests exceed pinTokens. Requests with marked lines (NOTE, CORRECTION,
+// must, never...) keep those lines first, newest first; the remaining room gives the newest
+// requests context or full text. Anything else is only counted: it stays reachable by jev_recall.
 export function boundPins(pins) {
   const sources = pins.filter(p => !p.omitted);
   const fit = (p, max, context) => tokens(p.text) <= max ? p : excerptPin(p, max, context);
+  const marked = p => p.text.split("\n").some(l => MARKED.test(l));
   const out = new Map();
   let room = LIMITS.pinTokens;
   const newestFirst = [...sources.keys()].reverse();
   for (const i of newestFirst) {
+    if (!marked(sources[i])) continue;
     const p = fit(sources[i], LIMITS.pinTokensMin, false);
     if (tokens(p.text) <= room) { out.set(i, p); room -= tokens(p.text); }
   }
   for (const i of newestFirst) {
-    if (!out.has(i)) continue;
-    const better = fit(sources[i], LIMITS.pinTokensEach, true), extra = tokens(better.text) - tokens(out.get(i).text);
+    const better = fit(sources[i], LIMITS.pinTokensEach, true), extra = tokens(better.text) - (out.has(i) ? tokens(out.get(i).text) : 0);
     if (extra > 0 && extra <= room) { out.set(i, better); room -= extra; }
   }
   const omitted = pins.reduce((n, p) => n + (p.omitted ?? 0), 0) + sources.length - out.size;
@@ -60,16 +62,16 @@ function renderQuote(c) { return `[${c.ref}; ${c.role}]\n${c.text}`; }
 function checkpoint(pins, body, files = "") {
   return `Session checkpoint. Earlier raw messages remain in Pi's session. Use jev_recall to verify missing details; excerpts are incomplete evidence.\n\nUser requests (verbatim unless labelled as an excerpt; historical; later requests take precedence):\n${pins.map(p => p.text).join("\n\n---\n\n")}\n\n${body}${files}`;
 }
-function previousState(event) {
+function previousEntry(event) {
   const latest = [...event.branchEntries].reverse().find(e => e.type === "compaction");
   // Match the actual prepared projection, not a stale/sibling compaction.
-  if (latest && latest.summary === event.preparation.previousSummary && latest.details?.engine === MARKER)
-    return latest.details.state;
+  if (latest && latest.summary === event.preparation.previousSummary && latest.details?.engine === MARKER) return latest;
 }
 export function makePlan(event, activeGoal) {
   const p = event.preparation;
   const messages = [...p.messagesToSummarize, ...p.turnPrefixMessages];
-  const prior = previousState(event);
+  const previous = previousEntry(event);
+  const prior = previous?.details.state;
   const pins = [...(prior?.pins ?? [])];
   const sourceIds = new Map(event.branchEntries.filter(e => e.type === "message").map(e => [JSON.stringify(e.message), e.id]));
   const candidates = [];
@@ -100,9 +102,17 @@ export function makePlan(event, activeGoal) {
   ])].slice(0, 8).sort((a, b) => unique.indexOf(a) - unique.indexOf(b));
   const priorBrief = prior?.brief ?? p.previousSummary ?? "";
   const removed = messages.reduce((n, m) => n + tokens(messageText(m)), 0) + tokens(p.previousSummary ?? "");
-  const modifiedFiles = [...new Set([...(p.fileOps?.written ?? []), ...(p.fileOps?.edited ?? [])])].sort();
-  const readFiles = [...(p.fileOps?.read ?? [])].filter(f => !modifiedFiles.includes(f)).sort();
-  const files = modifiedFiles.length || readFiles.length ? `\n\nFiles modified:\n${modifiedFiles.join("\n")}\nFiles read:\n${readFiles.join("\n")}` : "";
+  // Pi carries file lists forward only from its own compactions: merge ours here. The details keep
+  // the full cumulative lists; the checkpoint shows at most filesShown each, this span's first.
+  const modifiedNow = [...new Set([...(p.fileOps?.written ?? []), ...(p.fileOps?.edited ?? [])])].sort();
+  const modifiedFiles = [...new Set([...modifiedNow, ...(previous?.details.modifiedFiles ?? [])])].sort();
+  const readNow = [...(p.fileOps?.read ?? [])].filter(f => !modifiedFiles.includes(f)).sort();
+  const readFiles = [...new Set([...readNow, ...(previous?.details.readFiles ?? [])])].filter(f => !modifiedFiles.includes(f)).sort();
+  const shown = (now, all) => {
+    const list = [...new Set([...now, ...all])];
+    return list.slice(0, LIMITS.filesShown).join("\n") + (list.length > LIMITS.filesShown ? `\n(+${list.length - LIMITS.filesShown} more, listed in the compaction entry)` : "");
+  };
+  const files = modifiedFiles.length || readFiles.length ? `\n\nFiles modified:\n${shown(modifiedNow, modifiedFiles)}\nFiles read:\n${shown(readNow, readFiles)}` : "";
   return { pins, candidates: selected, priorBrief, removed, goal, files, readFiles, modifiedFiles };
 }
 
@@ -137,7 +147,9 @@ export async function compact(event, { summarize, key, fetchImpl, activeGoal, no
   if (plan.removed < LIMITS.minSavedTokens) return { cancel: true, reason: "too_little_to_reclaim" };
   const verbatimPins = plan.pins;
   const bound = () => { plan.pins = boundPins(verbatimPins); };
-  if (tokens(checkpoint(plan.pins, "", plan.files)) > plan.maxCheckpointTokens) bound();
+  // Verbatim requests are carried forward across compactions: cap them, or they grow without limit.
+  if (plan.pins.reduce((n, p) => n + tokens(p.text), 0) > LIMITS.pinTokens ||
+      tokens(checkpoint(plan.pins, "", plan.files)) > plan.maxCheckpointTokens) bound();
   if (tokens(checkpoint(plan.pins, "", plan.files)) > plan.maxCheckpointTokens) return { cancel: true, reason: "protected_text_exceeds_budget" };
   const decision = await select(plan.candidates, plan.goal, { key, signal: event.signal, fetchImpl });
   const evidence = plan.candidates.filter((_, i) => decision.choices[i] !== "ARCHIVE");
