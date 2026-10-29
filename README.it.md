@@ -9,7 +9,7 @@ La modalità predefinita non fa chiamate generative: al massimo una richiesta Je
 
 ## Installazione
 
-Richiede Node ≥ 22.19. La versione 0.3.0 è verificata su Pi 1.4.0; le versioni precedenti su 0.87.1 e 1.0.2.
+Richiede Node ≥ 22.19. Le versioni 0.3.x sono verificate su Pi 1.4.0; le versioni precedenti su 0.87.1 e 1.0.2.
 
 ```sh
 pi install git:github.com/maccagnit/pi-jev-compact        # oppure: pi install https://github.com/maccagnit/pi-jev-compact
@@ -79,7 +79,7 @@ La compattazione ordinaria mantiene soglia e confine di Pi: compatta oltre `cont
 ## Come funziona una compattazione
 
 1. L'hook `session_before_compact` di Pi fornisce i messaggi da sostituire e il confine. Il confine lo sceglie Pi, quindi le chiamate ai tool restano insieme ai loro risultati.
-2. Le richieste dell'utente vengono fissate testualmente e riportate nelle compattazioni successive (la più recente per ultima). Se non entrano nel budget di recupero vengono limitate (0.3.0). Ogni richiesta conserva le righe complete che iniziano con NOTE, CORRECTION, IMPORTANT, must, never, do not, TODO e simili. Le richieste più recenti ricevono poi prime e ultime righe, o il testo completo, entro 2.400 token stimati. Ogni estratto riporta l'id dell'originale; le richieste che non entrano vengono contate e restano recuperabili con `jev_recall`.
+2. Le richieste dell'utente vengono fissate testualmente e riportate nelle compattazioni successive (la più recente per ultima) finché in totale restano ≤ 2.400 token stimati. Oltre, vengono limitate (0.3.1): le richieste con righe marcate conservano prima quelle righe, così i fatti iniziali non vengono scalzati dalle richieste successive. Ogni richiesta conserva le righe complete che iniziano con NOTE, CORRECTION, IMPORTANT, must, never, do not, TODO e simili. Le richieste più recenti ricevono poi prime e ultime righe, o il testo completo, entro 2.400 token stimati. Ogni estratto riporta l'id dell'originale; le richieste che non entrano vengono contate e restano recuperabili con `jev_recall`.
 3. Fino a 8 estratti di evidenza (righe complete, ≤ 800 caratteri) vengono scelti localmente: materiale recente, corrispondenze con la richiesta corrente, errori e decisioni.
 4. Con la chiave, Jev classifica ogni estratto come KEEP / SUMMARIZE / ARCHIVE / UNCERTAIN. ARCHIVE si applica solo con probabilità ≥ 0,9. Vengono inviati solo la richiesta corrente abbreviata e gli estratti, dopo una redazione di credenziali comuni (chiavi PEM, bearer/basic, assegnazioni `key/token/password/secret` anche in JSON, `sk-`/`ts_`, chiavi AWS, GitHub, Slack, Google, JWT, credenziali negli URL). Non è una garanzia DLP.
 5. Il checkpoint punta a 2.400 token stimati (byte UTF-8 / 3, circa il 25% sopra i token reali per il codice). Può crescere per conservare intero un riepilogo precedente, ma deve sempre liberare ≥ 512 token e ≥ 30% del tratto sostituito.
@@ -92,7 +92,7 @@ Recupero straordinario per una sessione già troppo grande. Due passaggi locali,
 ## Limiti noti
 
 - Un checkpoint estrattivo perde contesto attivo. Gli originali sono recuperabili, ma il modello deve richiederli.
-- Le richieste testuali possono portare un checkpoint fino al 70% del tratto sostituito quando ci stanno. Si libera meno spazio di un riepilogo e si compatta più spesso.
+- Dettagli non marcati di vecchie richieste possono uscire dal checkpoint quando si raggiunge il limite di 2.400 token; restano recuperabili con `jev_recall`.
 - La modalità `summary` non ha mai prodotto un riepilogo accettato da un Qwen locale entro 20 s. Conviene `fast`, salvo modelli veloci.
 - Eliminare il file di sessione elimina gli originali recuperabili. Nelle sessioni `--no-session` restano solo in memoria.
 - Verificato su macOS; Windows e Linux non sono verificati.
